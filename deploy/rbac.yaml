@@ -1,0 +1,92 @@
+# safechange least-privilege RBAC. See docs/PERMISSIONS.md.
+# Identities live in safechange-system; their only grants on workloads are in "demo".
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: safechange-reader
+  namespace: safechange-system
+  labels: {app.kubernetes.io/part-of: safechange}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: safechange-applier
+  namespace: safechange-system
+  labels: {app.kubernetes.io/part-of: safechange}
+automountServiceAccountToken: false
+---
+# Reader: observe workloads in demo. No secrets, no configmaps, no writes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: safechange-reader
+  namespace: demo
+  labels: {app.kubernetes.io/part-of: safechange}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: safechange-reader
+  namespace: demo
+  labels: {app.kubernetes.io/part-of: safechange}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: safechange-reader}
+subjects:
+  - {kind: ServiceAccount, name: safechange-reader, namespace: safechange-system}
+---
+# Applier: get + patch Deployments in demo. Nothing else. No create/delete/update,
+# no pods/exec, no secrets, no RBAC, no cluster-scoped resources.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: safechange-applier
+  namespace: demo
+  labels: {app.kubernetes.io/part-of: safechange}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+# HARD KILL SWITCH: deleting this RoleBinding revokes all agent write access.
+# `safechange kill --hard` deletes it; `safechange unkill` recreates it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: safechange-applier
+  namespace: demo
+  labels: {app.kubernetes.io/part-of: safechange}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: safechange-applier}
+subjects:
+  - {kind: ServiceAccount, name: safechange-applier, namespace: safechange-system}
+---
+# Both agent identities may GET the control ConfigMap - and only that one object.
+# No update/patch/delete: the agent can read the soft kill switch but never flip it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: safechange-control-reader
+  namespace: safechange-system
+  labels: {app.kubernetes.io/part-of: safechange}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["safechange-control"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: safechange-control-reader
+  namespace: safechange-system
+  labels: {app.kubernetes.io/part-of: safechange}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: safechange-control-reader}
+subjects:
+  - {kind: ServiceAccount, name: safechange-reader, namespace: safechange-system}
+  - {kind: ServiceAccount, name: safechange-applier, namespace: safechange-system}

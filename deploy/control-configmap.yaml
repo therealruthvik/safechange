@@ -1,0 +1,9 @@
+# Soft kill switch. Only humans (admin credentials) can change this.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: safechange-control
+  namespace: safechange-system
+  labels: {app.kubernetes.io/part-of: safechange}
+data:
+  killed: "false"

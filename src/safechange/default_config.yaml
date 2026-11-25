@@ -1,0 +1,62 @@
+# safechange configuration. Every safety-relevant value has a conservative default.
+agent_identity: safechange-agent        # the agent's own name; may never approve
+state_dir: ~/.safechange                # SQLite store, audit log, snapshots, KILL file
+
+backend: kubectl                        # kubectl | fake
+
+kube:
+  # Agent credentials: two kubeconfigs, one ServiceAccount each (see scripts/make-kubeconfigs.sh).
+  reader_kubeconfig: .kube-safechange/reader.kubeconfig
+  reader_context: safechange-reader
+  applier_kubeconfig: .kube-safechange/applier.kubeconfig
+  applier_context: safechange-applier
+  # Human/admin credentials. Used ONLY by `kill`/`unkill`/`status` (and the demo's drift step).
+  admin_kubeconfig: ""                  # empty = default kubeconfig
+  admin_context: minikube
+  applier_rolebinding: {namespace: demo, name: safechange-applier}
+
+fake:
+  cluster_file: fake-cluster.json       # relative to state_dir
+  ready_after_polls: 2
+
+proposer:
+  default: rules                        # rules | llm
+  llm_model: claude-opus-5-5
+  llm_effort: medium
+
+policy:
+  allowed_kinds: [Deployment]
+  allowed_namespaces: [demo]
+  allowed_ops: [add, remove, replace]
+  allowed_paths:                        # '*' = one segment, trailing '**' = any depth
+    - /spec/replicas
+    - /spec/template/spec/containers/*/image
+    - /spec/template/spec/containers/*/resources/**
+    - /spec/template/spec/containers/*/env/**
+    - /metadata/labels/**
+  max_patch_ops: 5
+  min_replicas: 1
+  max_replicas: 10
+  max_replica_change_pct: 100           # 2 -> 4 is +100% (ok), 2 -> 5 is +150% (denied)
+  allowed_registries:
+    - docker.io/library
+    - ghcr.io/org
+    - registry.k8s.io
+  require_resource_limits: [cpu, memory]
+  server_dry_run: true
+
+approval:
+  approvers: [alice, bob, carol]
+  required_approvals: 1
+  ttl_minutes: 30
+  min_plan_hash_prefix: 8
+
+killswitch:
+  file: KILL                            # relative to state_dir -> ~/.safechange/KILL
+  env_var: SAFECHANGE_KILL
+  configmap: {namespace: safechange-system, name: safechange-control, key: killed}
+  on_engage_during_apply: freeze        # freeze | rollback
+
+rollout:
+  timeout_seconds: 90
+  poll_seconds: 2
